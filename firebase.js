@@ -1,7 +1,8 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
-import { getFirestore, collection, doc, setDoc, getDocs, query, where, onSnapshot, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
+import { getFirestore, collection, doc, setDoc, updateDoc, getDocs, query, where, orderBy, limit, onSnapshot, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
+import { REACTIONS, normalizeCommentInput } from './discussion.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -102,6 +103,82 @@ export async function saveClass(id, data) {
     const version = expectedVersion + 1;
     transaction.update(ref, { ...content, version, updatedAt: serverTimestamp() });
     return version;
+  });
+}
+
+function activityRef(classId, videoKey, name) {
+  const parent = classRef(classId);
+  if (typeof videoKey !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(videoKey)) {
+    fail('classpage/invalid-video', '영상 정보를 다시 확인해 주세요.');
+  }
+  return collection(parent, 'videoActivity', videoKey, name);
+}
+
+export function subscribeVideoActivity(classId, videoKey, onData, onError) {
+  const state = { comments: [], reactions: [] };
+  const ready = new Set();
+  const stops = [];
+  let active = true;
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    stops.forEach((stop) => stop());
+  };
+  const reportError = (error) => {
+    if (!active) return;
+    cleanup();
+    onError?.(error);
+  };
+  for (const [name, constraints] of [['comments', [orderBy('createdAt', 'desc'), limit(100)]], ['reactions', [limit(1000)]]]) {
+    if (!active) break;
+    try {
+      const target = query(activityRef(classId, videoKey, name), ...constraints);
+      const stop = onSnapshot(target, (snapshot) => {
+        if (!active) return;
+        state[name] = snapshot.docs.map((item) => ({ ...item.data(), id: item.id }));
+        ready.add(name);
+        if (ready.size === 2) onData({ comments: [...state.comments], reactions: [...state.reactions] });
+      }, reportError);
+      if (active) stops.push(stop);
+      else stop();
+    } catch (error) {
+      reportError(error);
+    }
+  }
+  return cleanup;
+}
+
+export async function addVideoComment(classId, video, input) {
+  const user = currentUser();
+  const normalized = normalizeCommentInput(input);
+  const target = doc(activityRef(classId, video?.id, 'comments'));
+  await setDoc(target, { authorUid: user.uid, ...normalized, video: structuredClone(video), createdAt: serverTimestamp(), deleted: false });
+  return target.id;
+}
+
+export async function deleteVideoComment(classId, videoKey, commentId) {
+  currentUser();
+  if (typeof commentId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(commentId)) {
+    fail('classpage/invalid-comment', '삭제할 댓글을 다시 확인해 주세요.');
+  }
+  await updateDoc(doc(activityRef(classId, videoKey, 'comments'), commentId), { body: '', deleted: true });
+}
+
+export async function toggleVideoReaction(classId, video, type) {
+  const user = currentUser();
+  if (!REACTIONS.some((reaction) => reaction.type === type)) {
+    fail('classpage/invalid-reaction', '사용할 수 없는 반응입니다.');
+  }
+  const target = doc(activityRef(classId, video?.id, 'reactions'), user.uid);
+  const videoData = structuredClone(video);
+  return runTransaction(db, async (transaction) => {
+    const previous = await transaction.get(target);
+    if (previous.exists() && previous.data().type === type) {
+      transaction.delete(target);
+      return null;
+    }
+    transaction.set(target, { authorUid: user.uid, type, video: videoData, updatedAt: serverTimestamp() });
+    return type;
   });
 }
 

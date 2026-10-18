@@ -1,6 +1,6 @@
 # 우리반 Classpage
 
-고등학교 학급의 공지, 수행평가, 칭찬 상점, 함께 볼 유튜브 영상을 한곳에 모으는 정적 웹 앱입니다. 교사는 Google 계정으로 로그인해 학급을 만들고 편집합니다. 학생은 공개된 학급 링크를 열어 로그인 없이 읽습니다.
+고등학교 학급의 공지, 수행평가, 칭찬 상점, 함께 볼 유튜브 영상을 한곳에 모으는 정적 웹 앱입니다. 교사는 Google 계정으로 로그인해 학급을 만들고 편집합니다. 학생은 공개된 학급 링크를 열어 로그인 없이 읽고, Google 로그인 후 영상에 댓글·답글과 반응을 남길 수 있습니다.
 
 2026-10-18 운영 점검: Google 제공자 활성화·로그인 화면 연결을 확인했고, Firestore 규칙을 실제 프로젝트에 배포했습니다. `classpage-khaki.vercel.app`도 승인 도메인에 등록했습니다. [상세 점검 결과](FIREBASE-CHECK.md)를 참고하세요. 본인 계정의 로그인 완료는 별도로 확인해야 합니다.
 
@@ -46,6 +46,16 @@ CLI가 없다면 Firebase Console의 Rules 게시 방식으로 완료할 수 있
 
 유튜브는 링크에서 영상 ID를 추출해 임베드합니다. 영상 업로더가 외부 재생을 차단했거나 영상을 삭제·비공개 처리하면 재생되지 않을 수 있으므로 유튜브 원본 링크로 확인하세요.
 
+### 영상 토론과 반응
+
+학생 공유 링크에서 **함께 보는 영상 → Google로 참여하기**를 선택합니다. 참여 별칭(1~20자)을 입력하고 댓글(1~1,000자)을 남깁니다. 댓글의 **답글**로 서로의 생각에 응답할 수 있습니다. 한 단계 답글을 지원하며, 다른 영상의 대화는 분리됩니다.
+
+하트·최고·새롭게 알았어요·응원해요 반응 중 영상마다 한 가지를 선택합니다. 같은 반응을 다시 누르면 취소되고 다른 반응을 누르면 바뀝니다. 댓글과 반응은 실시간으로 갱신되며, 새 대화가 도착해도 입력창이나 영상 iframe을 다시 만들지 않습니다. 최근 댓글·답글 100개와 최대 1,000명의 반응을 표시합니다.
+
+본인 댓글은 직접 삭제할 수 있고, 학급을 만든 교사는 관리 화면에서 모든 댓글을 삭제할 수 있습니다. 삭제된 글은 본문을 비우고 답글을 보존합니다. 별칭은 학생 신원을 인증하지 않으며 Google 계정 UID로 작성 권한을 구분합니다. 이메일이나 Google 프로필 이름은 댓글 문서에 저장하지 않습니다. 공개 학급의 댓글도 링크를 가진 사람이 읽을 수 있으므로 학생은 번호·별칭을 사용하고 개인정보를 입력하지 않도록 안내하세요.
+
+공유를 끄면 학생의 대화 읽기·쓰기도 차단됩니다. 영상을 삭제하면 화면에서 해당 대화가 사라지고 새 글·반응 추가가 차단됩니다. 이전 대화 문서는 별도로 보존되므로 학급을 다시 공개한 동안 알려진 경로로 읽을 수 있습니다. 체험 모드의 댓글·반응은 현재 브라우저에만 저장됩니다.
+
 ## GitHub 업로드
 
 대상 저장소: <https://github.com/reallygood83/classpage>
@@ -55,7 +65,7 @@ CLI가 없다면 Firebase Console의 Rules 게시 방식으로 완료할 수 있
 ```sh
 git init -b main
 git remote add origin https://github.com/reallygood83/classpage.git
-git add index.html app.js core.js firebase.js firebase-config.js scripts styles.css package.json vercel.json firebase.json firestore.rules .firebaserc .gitignore README.md tests assets QA.md FIREBASE-CHECK.md
+git add index.html app.js core.js discussion.js firebase.js firebase-config.js scripts styles.css package.json vercel.json firebase.json firestore.rules .firebaserc .gitignore README.md tests assets QA.md FIREBASE-CHECK.md
 git commit -m "Give teachers one shared classroom page"
 git push -u origin main
 ```
@@ -95,6 +105,8 @@ Vercel 빌드는 앞의 필수 변수 6개가 누락되면 실패합니다. 로�
 ## 저장 구조와 검증
 
 `classes/{자동생성 20자 ID}` 문서에 `ownerUid`, `name`, `notices`, `assessments`, `students`, `videos`, `published`, `version`, `updatedAt`을 저장합니다. 교사 UID는 수정할 수 없습니다. 저장할 때 기존 `version`이 일치하는지 트랜잭션으로 확인하고 하나 증가시켜 다른 창의 변경을 조용히 덮어쓰지 않도록 합니다. 충돌 안내가 뜨면 최신 내용을 확인한 다음 다시 입력합니다.
+
+영상 대화는 `classes/{classId}/videoActivity/{영상 항목 ID}/comments/{commentId}`, 반응은 같은 경로의 `reactions/{Google UID}`에 저장합니다. 학급 자료와 독립적으로 저장해 동시 대화가 학급 버전 충돌을 일으키지 않습니다. `firestore.rules`의 댓글·반응 규칙까지 Firebase에 게시해야 실제 학생의 참여가 가능합니다. 신규 댓글·반응은 현재 학급의 영상과 일치하는지, 로그인된 작성자 소유인지 서버 규칙에서 확인합니다.
 
 한 학급의 제한은 이름 60자, 공지 100개, 수행평가 100개, 학생 60명, 영상 50개입니다. Firestore 규칙은 최상위 필드·타입·배열 개수를 검증합니다. 클라이언트는 저장 자료의 JSON 크기를 700KB 이하로 제한합니다.
 

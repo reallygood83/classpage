@@ -26,3 +26,11 @@
 후속 운영 점검에서 Google 제공자 설정과 로그인 화면 연결, 운영 Firestore 규칙 배포 및 공개/비공개 접근을 확인했습니다. Vercel의 Firebase 변수 7개는 세 환경 모두 재조회해 일치함을 확인했고, 프로덕션 도메인을 Firebase 승인 도메인에 등록했습니다. 상세 결과와 검증 경계는 [FIREBASE-CHECK.md](FIREBASE-CHECK.md)에 기록했습니다. 실제 계정의 Google 로그인 완료는 아직 검증하지 않았습니다.
 
 세부 권한 증거: `.omo/evidence/firebase/REPORT.md`, `rules-results.json`, `api-results.json`. 코드 검토: `.omo/evidence/classpage-code-review.md`.
+
+## 영상 대화·반응 후속 검증
+
+2026-10-18 추가: Node 테스트 14개와 빌드·구문 검사 통과. 별도 실제 Firestore 에뮬레이터 신규 권한 검사 69개 및 기존 18개 통과, SDK 어댑터 모의 시나리오 6개 통과. 댓글·답글과 반응은 `discussion.js`에 공통 검증·집계를 두고 학급 본문과 독립적으로 저장합니다.
+
+로컬 `5175` 검증 서버에서 실제 CDN SDK를 Auth `9099`·Firestore `8188` 에뮬레이터에 연결했습니다. 가상 Google 계정 두 개의 브라우저에서 댓글 저장→다른 학생 조회→답글 실시간 반영, 반응별 합계와 본인 선택 분리, 다른 사람의 댓글 삭제 버튼 숨김, 본인 삭제 후 답글 유지, 영상 전환 시 대화 분리, 새 대화 수신 중 작성 내용 보존을 확인했습니다. 체험 모드의 반응 취소·변경도 실제 브라우저에서 확인했습니다. 576px 화면에서 가로 넘침이 없었습니다.
+
+코드 검토에서 발견한 저장 중 초안 유실 문제는 제출 중 입력 잠금과 현재 폼 초기화로 수정했습니다. 실제 소스 VM으로 저장 중 폼 교체와 다른 영상의 초안 보존도 검증했습니다. 최종 검토 승인: `.omo/evidence/classpage-discussion-code-review.md`. 신규 권한 증거: `.omo/evidence/video-security/`. Google 가상 계정을 사용한 에뮬레이터 검증과 본인 계정의 실제 OAuth 완료는 구분합니다.

@@ -34,6 +34,61 @@ service cloud.firestore {
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.version == resource.data.version + 1;
       allow delete: if owner();
+      match /videoActivity/{videoKey} {
+        function classData() {
+          return get(/databases/$(database)/documents/classes/$(classId)).data;
+        }
+        function classOwner() {
+          return signedIn() && classData().ownerUid == request.auth.uid;
+        }
+        function accessible() {
+          return classData().published == true || classOwner();
+        }
+        function googleUser() {
+          return signedIn() && request.auth.token.firebase.sign_in_provider == 'google.com';
+        }
+        function currentVideo(video) {
+          return video is map && video.id == videoKey && classData().videos.hasAny([video]);
+        }
+        match /comments/{commentId} {
+          function validParent(parentId) {
+            return parentId == '' || (parentId is string && parentId != commentId
+              && parentId.matches('^[A-Za-z0-9_-]{1,128}$')
+              && exists(/databases/$(database)/documents/classes/$(classId)/videoActivity/$(videoKey)/comments/$(parentId))
+              && get(/databases/$(database)/documents/classes/$(classId)/videoActivity/$(videoKey)/comments/$(parentId)).data.parentId == ''
+              && get(/databases/$(database)/documents/classes/$(classId)/videoActivity/$(videoKey)/comments/$(parentId)).data.deleted == false);
+          }
+          allow read: if accessible();
+          allow create: if googleUser() && accessible()
+            && request.resource.data.keys().hasAll(['authorUid', 'alias', 'body', 'parentId', 'video', 'createdAt', 'deleted'])
+            && request.resource.data.keys().hasOnly(['authorUid', 'alias', 'body', 'parentId', 'video', 'createdAt', 'deleted'])
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.alias is string && request.resource.data.alias.size() >= 1 && request.resource.data.alias.size() <= 20
+            && request.resource.data.body is string && request.resource.data.body.size() >= 1 && request.resource.data.body.size() <= 1000
+            && validParent(request.resource.data.parentId)
+            && currentVideo(request.resource.data.video)
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.deleted == false;
+          allow update: if googleUser() && accessible()
+            && (resource.data.authorUid == request.auth.uid || classOwner())
+            && resource.data.deleted == false
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'deleted'])
+            && request.resource.data.body == '' && request.resource.data.deleted == true;
+          allow delete: if false;
+        }
+        match /reactions/{uid} {
+          allow read: if accessible();
+          allow create, update: if googleUser() && accessible() && uid == request.auth.uid
+            && request.resource.data.keys().hasAll(['authorUid', 'type', 'video', 'updatedAt'])
+            && request.resource.data.keys().hasOnly(['authorUid', 'type', 'video', 'updatedAt'])
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.type in ['heart', 'thumbsUp', 'idea', 'clap']
+            && currentVideo(request.resource.data.video)
+            && request.resource.data.updatedAt == request.time;
+          allow delete: if googleUser() && accessible() && uid == request.auth.uid
+            && resource.data.authorUid == request.auth.uid;
+        }
+      }
     }
   }
 }

@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveFirebaseConfig } from './config.mjs';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-const publicFiles = ['index.html', 'app.js', 'core.js', 'firebase.js', 'styles.css'];
+const publicFiles = ['index.html', 'app.js', 'core.js', 'discussion.js', 'firebase.js', 'styles.css'];
 const assetExtensions = new Set(['.png', '.jpg', '.jpeg', '.svg', '.webp', '.gif', '.ico', '.woff', '.woff2']);
 
 export function build({ rootDir = projectRoot, env = process.env } = {}) {
