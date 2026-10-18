@@ -6,10 +6,10 @@
 
 - 앱은 Firebase SDK 13.0.0의 `GoogleAuthProvider`와 `signInWithPopup`을 사용합니다.
 - 운영 프로젝트의 `google.com` 제공자 활성화와 OAuth 클라이언트 설정을 관리 API로 확인했습니다.
-- 승인 도메인은 `localhost`, `classpage-6fe5c.firebaseapp.com`, `classpage-6fe5c.web.app`입니다.
+- 승인 도메인은 `localhost`, `classpage-6fe5c.firebaseapp.com`, `classpage-6fe5c.web.app`, `classpage-khaki.vercel.app`입니다. Vercel 도메인 추가 후 관리 API로 다시 조회해 확인했습니다.
 - 로컬 앱의 실제 로그인 버튼을 눌러 Firebase 인증 핸들러를 거쳐 Google 계정 로그인 화면으로 연결되는 것을 확인했습니다.
 - 해당 브라우저에는 Google 로그인 세션이 없어 이메일/비밀번호 입력 화면에서 멈췄습니다. 본인의 계정으로 로그인 완료 후 학급 생성·저장을 실행하는 전체 흐름은 아직 검증하지 않았습니다.
-- Vercel 배포 후 발급된 실제 도메인은 Firebase 승인 도메인에 추가해야 합니다. Vercel 배포는 이번 작업에 포함하지 않았습니다.
+- Vercel `classpage` 프로젝트의 Production·Preview·Development에 Firebase 웹 설정 변수 7개를 등록했습니다. 빌드는 환경 변수로 `dist/firebase-config.js`를 생성합니다. Preview의 개별 호스트에서 로그인하려면 해당 도메인도 추가해야 합니다.
 
 ## Firestore 규칙
 
@@ -46,7 +46,7 @@ firebase deploy --only firestore:rules --project classpage-6fe5c --non-interacti
 
 ## 배포 후 마지막 확인
 
-실제 Vercel 도메인을 승인 도메인에 추가한 뒤 해당 주소에서 Google 로그인 → 학급 생성 → 공지 저장 → 공유 켜기 → 로그아웃한 브라우저에서 읽기 → 공유 해제 순서로 확인합니다.
+실제 Vercel 주소에서 본인 계정으로 Google 로그인 → 학급 생성 → 공지 저장 → 공유 켜기 → 로그아웃한 브라우저에서 읽기 → 공유 해제 순서로 확인합니다.
 
 ## 공식 문서
 

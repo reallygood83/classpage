@@ -1,16 +1,9 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, getDocs, query, where, onSnapshot, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
+import { firebaseConfig } from './firebase-config.js';
 
-const app = initializeApp({
-  apiKey: 'AIzaSyA6oeeKUjRul8F74reenCIj7cdbog5kvm0',
-  authDomain: 'classpage-6fe5c.firebaseapp.com',
-  projectId: 'classpage-6fe5c',
-  storageBucket: 'classpage-6fe5c.firebasestorage.app',
-  messagingSenderId: '281218495064',
-  appId: '1:281218495064:web:61279e33462ad7292c902d',
-  measurementId: 'G-7QNPTRLZ58',
-});
+const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 auth.languageCode = 'ko';

@@ -2,7 +2,7 @@
 
 고등학교 학급의 공지, 수행평가, 칭찬 상점, 함께 볼 유튜브 영상을 한곳에 모으는 정적 웹 앱입니다. 교사는 Google 계정으로 로그인해 학급을 만들고 편집합니다. 학생은 공개된 학급 링크를 열어 로그인 없이 읽습니다.
 
-2026-10-18 운영 점검: Google 제공자 활성화·승인 도메인·Google 로그인 화면 연결을 확인했고, Firestore 규칙을 실제 프로젝트에 배포했습니다. [상세 점검 결과](FIREBASE-CHECK.md)를 참고하세요. 본인 계정의 로그인 완료와 Vercel 배포 도메인 등록은 별도로 확인해야 합니다.
+2026-10-18 운영 점검: Google 제공자 활성화·로그인 화면 연결을 확인했고, Firestore 규칙을 실제 프로젝트에 배포했습니다. `classpage-khaki.vercel.app`도 승인 도메인에 등록했습니다. [상세 점검 결과](FIREBASE-CHECK.md)를 참고하세요. 본인 계정의 로그인 완료는 별도로 확인해야 합니다.
 
 ## 실행
 
@@ -18,7 +18,7 @@ npm run dev
 
 ## Firebase 최초 설정
 
-연결된 Firebase 프로젝트는 `classpage-6fe5c`입니다. 전달받은 웹 앱 설정은 `firebase.js`에 들어 있습니다. Analytics는 초기화하지 않습니다.
+연결된 Firebase 프로젝트는 `classpage-6fe5c`입니다. 로컬 개발용 웹 앱 설정은 `firebase-config.js`에 들어 있습니다. Vercel에서는 빌드 시 환경 변수로 설정 모듈을 생성합니다. Analytics는 초기화하지 않습니다.
 
 1. [Firebase Console](https://console.firebase.google.com/project/classpage-6fe5c/overview)에서 프로젝트를 엽니다.
 2. **Authentication → Sign-in method → Google**을 활성화합니다. 프로젝트 표시 이름과 지원 이메일을 지정하고 저장합니다.
@@ -55,7 +55,7 @@ CLI가 없다면 Firebase Console의 Rules 게시 방식으로 완료할 수 있
 ```sh
 git init -b main
 git remote add origin https://github.com/reallygood83/classpage.git
-git add index.html app.js core.js firebase.js styles.css package.json vercel.json firebase.json firestore.rules .firebaserc .gitignore README.md tests assets QA.md FIREBASE-CHECK.md
+git add index.html app.js core.js firebase.js firebase-config.js scripts styles.css package.json vercel.json firebase.json firestore.rules .firebaserc .gitignore README.md tests assets QA.md FIREBASE-CHECK.md
 git commit -m "Give teachers one shared classroom page"
 git push -u origin main
 ```
@@ -74,11 +74,23 @@ git status
 
 1. Vercel에서 **Add New → Project**를 선택합니다.
 2. GitHub의 `reallygood83/classpage`를 가져옵니다.
-3. **Framework Preset: Other**, **Root Directory: 저장소 루트**, **Output Directory: `.`**로 설정합니다. 제공된 `vercel.json`의 `npm run build`는 JavaScript 구문 검사만 실행합니다. 번들 생성이나 서버 빌드, npm 의존성 설치는 필요하지 않습니다.
+3. **Framework Preset: Other**, **Root Directory: 저장소 루트**, **Build Command: `npm run build`**, **Output Directory: `dist`**로 설정합니다. 빌드는 JavaScript 구문 검사 후 공개 앱 파일과 이미지·폰트, Firebase 설정 모듈만 `dist/`에 생성합니다. npm 의존성 설치는 필요하지 않습니다.
 4. Deploy 후 발급된 도메인을 Firebase Authentication의 Authorized domains에 등록합니다.
 5. 배포 주소에서 Google 로그인 → 학급 생성 → 내용 저장 → 공개 → 로그아웃한 브라우저에서 공유 링크 조회까지 확인합니다. 다른 Google 계정으로 수정할 수 없는지도 확인합니다.
 
-환경 변수나 Firebase Admin SDK는 사용하지 않습니다. 실제 Firebase 설정, 규칙 게시, GitHub 업로드, Vercel 배포는 각각 별도 작업입니다. 로컬 화면이 작동한다는 사실만으로 배포와 클라우드 로그인이 완료된 것은 아닙니다.
+현재 Vercel `classpage` 프로젝트의 Production·Preview·Development에 아래 변수를 등록했습니다. 환경 변수 변경은 새 배포부터 반영됩니다.
+
+| 변수 | 용도 |
+| --- | --- |
+| `FIREBASE_API_KEY` | 웹 앱 API 키 |
+| `FIREBASE_AUTH_DOMAIN` | 인증 도메인 |
+| `FIREBASE_PROJECT_ID` | Firebase 프로젝트 ID |
+| `FIREBASE_STORAGE_BUCKET` | 저장소 버킷 |
+| `FIREBASE_MESSAGING_SENDER_ID` | 발신자 ID |
+| `FIREBASE_APP_ID` | 웹 앱 ID |
+| `FIREBASE_MEASUREMENT_ID` | 선택적 Analytics 식별자 |
+
+Vercel 빌드는 앞의 필수 변수 6개가 누락되면 실패합니다. 로컬 빌드는 기본값을 사용하며, 같은 이름의 셸 환경 변수로 덮어쓸 수 있습니다. Firebase Web SDK 설정은 브라우저에 전달되는 공개 클라이언트 설정입니다. Firebase Admin SDK 비밀키는 사용하지 않습니다. 실제 Firebase 설정, 규칙 게시, GitHub 업로드, Vercel 배포는 각각 별도 작업입니다.
 
 ## 저장 구조와 검증
 
