@@ -1,0 +1,104 @@
+# 우리반 Classpage
+
+고등학교 학급의 공지, 수행평가, 칭찬 상점, 함께 볼 유튜브 영상을 한곳에 모으는 정적 웹 앱입니다. 교사는 Google 계정으로 로그인해 학급을 만들고 편집합니다. 학생은 공개된 학급 링크를 열어 로그인 없이 읽습니다.
+
+2026-10-18 운영 점검: Google 제공자 활성화·승인 도메인·Google 로그인 화면 연결을 확인했고, Firestore 규칙을 실제 프로젝트에 배포했습니다. [상세 점검 결과](FIREBASE-CHECK.md)를 참고하세요. 본인 계정의 로그인 완료와 Vercel 배포 도메인 등록은 별도로 확인해야 합니다.
+
+## 실행
+
+Node.js와 Python 3가 설치된 환경에서 프로젝트 폴더를 열고 실행합니다.
+
+```sh
+npm run dev
+```
+
+브라우저에서 <http://localhost:5173>을 엽니다. 파일을 직접 더블클릭하는 `file://` 방식은 ES 모듈과 Google 로그인에 적합하지 않습니다. npm 패키지 설치 없이 실행하며 Firebase SDK는 공식 CDN의 **13.0.0**을 사용합니다.
+
+화면의 체험 모드는 가상 학급을 현재 브라우저에 저장합니다. Firebase에 저장되거나 다른 학생의 기기로 공유되는 실제 학급이 아닙니다. 실제 학급은 Google 로그인과 아래 Firebase 설정을 완료한 뒤 사용합니다. 브라우저 저장 공간을 지우면 체험 데이터도 삭제됩니다.
+
+## Firebase 최초 설정
+
+연결된 Firebase 프로젝트는 `classpage-6fe5c`입니다. 전달받은 웹 앱 설정은 `firebase.js`에 들어 있습니다. Analytics는 초기화하지 않습니다.
+
+1. [Firebase Console](https://console.firebase.google.com/project/classpage-6fe5c/overview)에서 프로젝트를 엽니다.
+2. **Authentication → Sign-in method → Google**을 활성화합니다. 프로젝트 표시 이름과 지원 이메일을 지정하고 저장합니다.
+3. **Authentication → Settings → Authorized domains**에서 `localhost`와 실제 Vercel 배포 도메인(예: `선택한프로젝트.vercel.app`)을 추가합니다. `https://`, 경로, 포트는 넣지 않습니다. 별도 커스텀 도메인이나 Preview 주소에서 로그인하려면 그 정확한 도메인도 추가해야 합니다.
+4. **Firestore Database → Create database**에서 기본 `(default)` 데이터베이스를 만들고 **프로덕션 모드**를 선택합니다. 학교 사용 위치에 맞는 리전을 선택합니다.
+5. **Firestore Database → Rules**에 이 프로젝트의 `firestore.rules` 전체를 붙여 넣고 **게시(Publish)**합니다. 테스트 모드의 전체 허용 규칙을 그대로 두지 마세요.
+
+Firebase CLI를 이미 사용한다면 5번 대신 프로젝트 루트에서 다음 명령으로 규칙을 배포할 수 있습니다. 이 명령은 실제 프로젝트의 규칙을 변경하므로 대상 프로젝트를 확인합니다.
+
+```sh
+firebase login
+firebase deploy --only firestore:rules --project classpage-6fe5c
+```
+
+CLI가 없다면 Firebase Console의 Rules 게시 방식으로 완료할 수 있습니다. 이 저장소의 파일만 GitHub/Vercel에 올리는 것으로 Firebase 로그인 제공자나 Firestore 규칙이 활성화되지는 않습니다.
+
+## 학급 운영
+
+1. Google 로그인 후 학급을 만듭니다. 새 학급은 비공개로 시작합니다.
+2. 공지와 수행평가 일정, 학생별 상점, 유튜브 링크를 입력합니다.
+3. 학생에게 보여줄 준비가 되면 학급 공개를 켜고 공유 링크를 전달합니다. 교실 전자칠판에서도 같은 링크를 열 수 있습니다.
+4. 공개를 끄면 소유자를 제외한 접근이 차단됩니다. 교사는 본인 계정으로 다시 로그인해 자료를 이어서 편집할 수 있습니다.
+
+상점에는 학생 번호나 별명을 사용하세요. **공개 학급 링크를 가진 사람은 학급의 공지, 수행평가, 학생 별명·상점, 영상 정보를 모두 읽을 수 있습니다.** 링크는 학생 전용 인증을 제공하지 않으며 외부에 재전달될 수 있습니다. 학급 목록은 소유자만 조회하고, 수정도 해당 학급을 만든 Google 계정만 가능합니다.
+
+유튜브는 링크에서 영상 ID를 추출해 임베드합니다. 영상 업로더가 외부 재생을 차단했거나 영상을 삭제·비공개 처리하면 재생되지 않을 수 있으므로 유튜브 원본 링크로 확인하세요.
+
+## GitHub 업로드
+
+대상 저장소: <https://github.com/reallygood83/classpage>
+
+아직 Git 저장소가 아닌 새 작업 폴더이고 원격 저장소가 비어 있다면:
+
+```sh
+git init -b main
+git remote add origin https://github.com/reallygood83/classpage.git
+git add index.html app.js core.js firebase.js styles.css package.json vercel.json firebase.json firestore.rules .firebaserc .gitignore README.md tests assets QA.md FIREBASE-CHECK.md
+git commit -m "Give teachers one shared classroom page"
+git push -u origin main
+```
+
+이미 원격 저장소에 커밋이 있다면 먼저 별도 폴더에 복제하고 이 앱 파일을 복사한 뒤 변경사항을 확인해 커밋·푸시합니다. 강제 푸시는 사용하지 않습니다.
+
+```sh
+git clone https://github.com/reallygood83/classpage.git
+cd classpage
+git status
+```
+
+웹 Firebase 설정의 API 키는 클라이언트 앱 식별용 설정입니다. 데이터 접근은 `firestore.rules`와 로그인 권한으로 제한합니다. 서비스 계정 JSON, 개인 액세스 토큰, `.env` 비밀값은 저장소에 넣지 않습니다.
+
+## Vercel 배포
+
+1. Vercel에서 **Add New → Project**를 선택합니다.
+2. GitHub의 `reallygood83/classpage`를 가져옵니다.
+3. **Framework Preset: Other**, **Root Directory: 저장소 루트**, **Output Directory: `.`**로 설정합니다. 제공된 `vercel.json`의 `npm run build`는 JavaScript 구문 검사만 실행합니다. 번들 생성이나 서버 빌드, npm 의존성 설치는 필요하지 않습니다.
+4. Deploy 후 발급된 도메인을 Firebase Authentication의 Authorized domains에 등록합니다.
+5. 배포 주소에서 Google 로그인 → 학급 생성 → 내용 저장 → 공개 → 로그아웃한 브라우저에서 공유 링크 조회까지 확인합니다. 다른 Google 계정으로 수정할 수 없는지도 확인합니다.
+
+환경 변수나 Firebase Admin SDK는 사용하지 않습니다. 실제 Firebase 설정, 규칙 게시, GitHub 업로드, Vercel 배포는 각각 별도 작업입니다. 로컬 화면이 작동한다는 사실만으로 배포와 클라우드 로그인이 완료된 것은 아닙니다.
+
+## 저장 구조와 검증
+
+`classes/{자동생성 20자 ID}` 문서에 `ownerUid`, `name`, `notices`, `assessments`, `students`, `videos`, `published`, `version`, `updatedAt`을 저장합니다. 교사 UID는 수정할 수 없습니다. 저장할 때 기존 `version`이 일치하는지 트랜잭션으로 확인하고 하나 증가시켜 다른 창의 변경을 조용히 덮어쓰지 않도록 합니다. 충돌 안내가 뜨면 최신 내용을 확인한 다음 다시 입력합니다.
+
+한 학급의 제한은 이름 60자, 공지 100개, 수행평가 100개, 학생 60명, 영상 50개입니다. Firestore 규칙은 최상위 필드·타입·배열 개수를 검증합니다. 클라이언트는 저장 자료의 JSON 크기를 700KB 이하로 제한합니다.
+
+```sh
+npm run check
+npm test
+```
+
+기능별 로컬 검증 결과는 [QA.md](QA.md)에 정리했습니다.
+
+위 검사는 로컬 코드 검사입니다. Google OAuth와 배포된 Firestore 규칙은 실제 Firebase 프로젝트를 설정한 뒤 별도로 확인해야 합니다.
+
+## 공식 문서
+
+- [Firebase CDN 모듈 설정](https://firebase.google.com/docs/web/alt-setup)
+- [Google 로그인 설정](https://firebase.google.com/docs/auth/web/google-signin)
+- [Firestore 트랜잭션](https://firebase.google.com/docs/firestore/manage-data/transactions)
+- [Firestore 쿼리와 보안 규칙](https://firebase.google.com/docs/firestore/security/rules-query)
+- [Vercel 정적 프로젝트와 빌드 설정](https://vercel.com/docs/builds/configure-a-build)

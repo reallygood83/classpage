@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function owner() {
+      return signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+    function validClass(data) {
+      return data.keys().hasAll(['ownerUid', 'name', 'notices', 'assessments', 'students', 'videos', 'published', 'version', 'updatedAt'])
+        && data.keys().hasOnly(['ownerUid', 'name', 'notices', 'assessments', 'students', 'videos', 'published', 'version', 'updatedAt'])
+        && data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 60
+        && data.notices is list && data.notices.size() <= 100
+        && data.assessments is list && data.assessments.size() <= 100
+        && data.students is list && data.students.size() <= 60
+        && data.videos is list && data.videos.size() <= 50
+        && data.published is bool
+        && data.version is int && data.version >= 0
+        && data.updatedAt == request.time;
+    }
+    match /classes/{classId} {
+      allow get: if resource.data.published == true || owner();
+      allow list: if owner();
+      allow create: if signedIn()
+        && classId.matches('^[A-Za-z0-9]{20}$')
+        && validClass(request.resource.data)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.version == 0
+        && request.resource.data.published == false;
+      allow update: if owner()
+        && validClass(request.resource.data)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.version == resource.data.version + 1;
+      allow delete: if owner();
+    }
+  }
+}
