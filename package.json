@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check app.js && node --check core.js && node --check discussion.js && node --check firebase.js && node --check firebase-config.js && node --check scripts/config.mjs && node --check scripts/build.mjs",
+    "check": "node --check app.js && node --check core.js && node --check discussion.js && node --check enrollment.js && node --check firebase.js && node --check firebase-config.js && node --check scripts/config.mjs && node --check scripts/build.mjs",
     "dev": "python3 -m http.server 5173",
     "build": "npm run check && node scripts/build.mjs"
   }

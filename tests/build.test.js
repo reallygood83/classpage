@@ -41,7 +41,7 @@ test('Vercel fails for each missing or blank required variable and permits absen
 test('build emits an importable config and only allowlisted static files', async (t) => {
   const rootDir = mkdtempSync(join(tmpdir(), 'classpage-build-'));
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
-  for (const name of ['index.html', 'app.js', 'core.js', 'discussion.js', 'firebase.js', 'styles.css']) writeFileSync(join(rootDir, name), name);
+  for (const name of ['index.html', 'app.js', 'core.js', 'discussion.js', 'enrollment.js', 'firebase.js', 'styles.css']) writeFileSync(join(rootDir, name), name);
   for (const name of ['assets', '.git', '.omo', 'tests']) mkdirSync(join(rootDir, name));
   writeFileSync(join(rootDir, '.env'), 'DATABASE_PASSWORD=private');
   writeFileSync(join(rootDir, 'README.md'), 'internal');
@@ -50,7 +50,7 @@ test('build emits an importable config and only allowlisted static files', async
   writeFileSync(join(rootDir, 'assets', '.hidden.png'), 'private');
   symlinkSync(join(rootDir, '.env'), join(rootDir, 'assets', 'secret.jpg'));
   const outputDir = build({ rootDir, env: { ...deploymentEnv, FIREBASE_API_KEY: 'quote"\nvalue', SERVICE_ACCOUNT: 'do-not-leak' } });
-  assert.deepEqual(readdirSync(outputDir).sort(), ['app.js', 'assets', 'core.js', 'discussion.js', 'firebase-config.js', 'firebase.js', 'index.html', 'styles.css']);
+  assert.deepEqual(readdirSync(outputDir).sort(), ['app.js', 'assets', 'core.js', 'discussion.js', 'enrollment.js', 'firebase-config.js', 'firebase.js', 'index.html', 'styles.css']);
   assert.deepEqual(readdirSync(join(outputDir, 'assets')), ['hero.jpg']);
   const source = readFileSync(join(outputDir, 'firebase-config.js'), 'utf8');
   assert.equal(source.includes('do-not-leak'), false);

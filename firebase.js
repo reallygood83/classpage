@@ -1,8 +1,9 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
-import { getFirestore, collection, doc, setDoc, updateDoc, getDocs, query, where, orderBy, limit, onSnapshot, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
+import { getFirestore, collection, doc, setDoc, updateDoc, getDoc, getDocs, query, where, orderBy, limit, onSnapshot, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 import { REACTIONS, normalizeCommentInput } from './discussion.js';
+import { normalizeClassCode, normalizeStudentAlias, generateClassCodeValue } from './enrollment.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -104,6 +105,96 @@ export async function saveClass(id, data) {
     transaction.update(ref, { ...content, version, updatedAt: serverTimestamp() });
     return version;
   });
+}
+
+function enrollmentRef(classId) {
+  classRef(classId);
+  return doc(db, 'classEnrollment', classId);
+}
+
+function membershipRef(classId, uid) {
+  classRef(classId);
+  return doc(db, 'classMembers', classId, 'students', uid);
+}
+
+export async function getEnrollment(classId) {
+  currentUser();
+  const snapshot = await getDoc(enrollmentRef(classId));
+  return snapshot.exists() ? snapshot.data() : null;
+}
+
+export async function generateClassCode(classId) {
+  const user = currentUser();
+  const parent = classRef(classId);
+  const enrollment = enrollmentRef(classId);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateClassCodeValue();
+    const codeRef = doc(db, 'classCodes', code);
+    try {
+      return await runTransaction(db, async (transaction) => {
+        const classSnapshot = await transaction.get(parent);
+        if (!classSnapshot.exists() || classSnapshot.data().ownerUid !== user.uid) {
+          fail('permission-denied', '학급을 만든 선생님만 참여 코드를 관리할 수 있습니다.');
+        }
+        const current = await transaction.get(enrollment);
+        const collision = await transaction.get(codeRef);
+        if (collision.exists()) fail('classpage/code-collision', '다른 학급 코드와 겹쳤습니다. 새 코드를 다시 만듭니다.');
+        transaction.set(enrollment, { code, ownerUid: user.uid, updatedAt: serverTimestamp() });
+        transaction.set(codeRef, { classId, ownerUid: user.uid, createdAt: serverTimestamp() });
+        if (current.exists()) transaction.delete(doc(db, 'classCodes', current.data().code));
+        return code;
+      });
+    } catch (error) {
+      if (error.code !== 'classpage/code-collision' || attempt === 4) throw error;
+    }
+  }
+}
+
+export async function joinClassByCode(inputCode, inputAlias) {
+  const user = currentUser();
+  const code = normalizeClassCode(inputCode);
+  const alias = normalizeStudentAlias(inputAlias);
+  return runTransaction(db, async (transaction) => {
+    const mapping = await transaction.get(doc(db, 'classCodes', code));
+    if (!mapping.exists()) fail('classpage/invalid-code', '사용할 수 없는 학급 코드입니다. 선생님께 현재 코드를 확인해 주세요.');
+    const { classId, ownerUid } = mapping.data();
+    const memberRef = membershipRef(classId, user.uid);
+    const indexRef = doc(db, 'studentClasses', user.uid, 'classes', classId);
+    const member = await transaction.get(memberRef);
+    const index = await transaction.get(indexRef);
+    if (member.exists() && index.exists()) return classId;
+    if (member.exists() || index.exists()) fail('classpage/membership-incomplete', '학급 등록 정보가 일치하지 않습니다. 선생님께 문의해 주세요.');
+    const membership = { classId, uid: user.uid, ownerUid, alias, joinCode: code, joinedAt: serverTimestamp() };
+    transaction.set(memberRef, membership);
+    transaction.set(indexRef, membership);
+    return classId;
+  });
+}
+
+export async function getClassMembership(classId) {
+  const user = currentUser();
+  const snapshot = await getDoc(membershipRef(classId, user.uid));
+  return snapshot.exists() ? snapshot.data() : null;
+}
+
+export async function listJoinedClasses() {
+  const user = currentUser();
+  const memberships = await getDocs(collection(db, 'studentClasses', user.uid, 'classes'));
+  const joined = await Promise.all(memberships.docs.map(async (item) => {
+    const snapshot = await getDoc(classRef(item.id));
+    if (!snapshot.exists()) return null;
+    const data = snapshot.data();
+    return { id: item.id, name: data.name, ownerUid: data.ownerUid, alias: item.data().alias };
+  }));
+  return joined.filter(Boolean);
+}
+
+export function subscribeClassMembers(classId, onData, onError) {
+  currentUser();
+  classRef(classId);
+  return onSnapshot(collection(db, 'classMembers', classId, 'students'), (snapshot) => {
+    onData(snapshot.docs.map((item) => ({ uid: item.id, alias: item.data().alias, joinedAt: item.data().joinedAt })));
+  }, onError);
 }
 
 function activityRef(classId, videoKey, name) {

@@ -4,6 +4,31 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
+    function googleUser() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function ownsClass(classId) {
+      return signedIn() && get(/databases/$(database)/documents/classes/$(classId)).data.ownerUid == request.auth.uid;
+    }
+    function enrolled(classId) {
+      return signedIn() && exists(/databases/$(database)/documents/classMembers/$(classId)/students/$(request.auth.uid));
+    }
+    function validCode(code) {
+      return code is string && code.matches('^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{10}$');
+    }
+    function validMembership(data, classId, uid) {
+      return googleUser() && request.auth.uid == uid
+        && data.keys().hasAll(['classId', 'uid', 'ownerUid', 'alias', 'joinCode', 'joinedAt'])
+        && data.keys().hasOnly(['classId', 'uid', 'ownerUid', 'alias', 'joinCode', 'joinedAt'])
+        && data.classId == classId && data.uid == uid
+        && data.ownerUid == get(/databases/$(database)/documents/classes/$(classId)).data.ownerUid
+        && data.alias is string && data.alias.size() >= 1 && data.alias.size() <= 20
+        && validCode(data.joinCode)
+        && getAfter(/databases/$(database)/documents/classCodes/$(data.joinCode)).data.classId == classId
+        && getAfter(/databases/$(database)/documents/classCodes/$(data.joinCode)).data.ownerUid == data.ownerUid
+        && getAfter(/databases/$(database)/documents/classEnrollment/$(classId)).data.code == data.joinCode
+        && data.joinedAt == request.time;
+    }
     function owner() {
       return signedIn() && resource.data.ownerUid == request.auth.uid;
     }
@@ -20,8 +45,57 @@ service cloud.firestore {
         && data.version is int && data.version >= 0
         && data.updatedAt == request.time;
     }
+    match /classEnrollment/{classId} {
+      function validSettings(data) {
+        return data.keys().hasAll(['code', 'ownerUid', 'updatedAt'])
+          && data.keys().hasOnly(['code', 'ownerUid', 'updatedAt'])
+          && validCode(data.code) && data.ownerUid == request.auth.uid
+          && data.updatedAt == request.time
+          && getAfter(/databases/$(database)/documents/classCodes/$(data.code)).data.classId == classId
+          && getAfter(/databases/$(database)/documents/classCodes/$(data.code)).data.ownerUid == data.ownerUid
+          && getAfter(/databases/$(database)/documents/classCodes/$(data.code)).data.createdAt == request.time;
+      }
+      allow get: if ownsClass(classId);
+      allow list, delete: if false;
+      allow create: if ownsClass(classId) && validSettings(request.resource.data);
+      allow update: if ownsClass(classId) && validSettings(request.resource.data)
+        && request.resource.data.code != resource.data.code
+        && !existsAfter(/databases/$(database)/documents/classCodes/$(resource.data.code));
+    }
+    match /classCodes/{code} {
+      allow get: if googleUser();
+      allow list, update: if false;
+      allow create: if signedIn() && validCode(code)
+        && request.resource.data.keys().hasAll(['classId', 'ownerUid', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['classId', 'ownerUid', 'createdAt'])
+        && request.resource.data.classId is string
+        && ownsClass(request.resource.data.classId)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/classEnrollment/$(request.resource.data.classId)).data.code == code
+        && getAfter(/databases/$(database)/documents/classEnrollment/$(request.resource.data.classId)).data.ownerUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/classEnrollment/$(request.resource.data.classId)).data.updatedAt == request.time;
+      allow delete: if ownsClass(resource.data.classId)
+        && get(/databases/$(database)/documents/classEnrollment/$(resource.data.classId)).data.code == code
+        && getAfter(/databases/$(database)/documents/classEnrollment/$(resource.data.classId)).data.code != code
+        && getAfter(/databases/$(database)/documents/classEnrollment/$(resource.data.classId)).data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/classCodes/$(getAfter(/databases/$(database)/documents/classEnrollment/$(resource.data.classId)).data.code)).data.classId == resource.data.classId;
+    }
+    match /classMembers/{classId}/students/{uid} {
+      allow get: if (signedIn() && request.auth.uid == uid) || ownsClass(classId);
+      allow list: if ownsClass(classId);
+      allow create: if validMembership(request.resource.data, classId, uid)
+        && getAfter(/databases/$(database)/documents/studentClasses/$(uid)/classes/$(classId)).data == request.resource.data;
+      allow update, delete: if false;
+    }
+    match /studentClasses/{uid}/classes/{classId} {
+      allow get, list: if signedIn() && request.auth.uid == uid;
+      allow create: if validMembership(request.resource.data, classId, uid)
+        && getAfter(/databases/$(database)/documents/classMembers/$(classId)/students/$(uid)).data == request.resource.data;
+      allow update, delete: if false;
+    }
     match /classes/{classId} {
-      allow get: if resource.data.published == true || owner();
+      allow get: if resource.data.published == true || owner() || enrolled(classId);
       allow list: if owner();
       allow create: if signedIn()
         && classId.matches('^[A-Za-z0-9]{20}$')
@@ -42,10 +116,10 @@ service cloud.firestore {
           return signedIn() && classData().ownerUid == request.auth.uid;
         }
         function accessible() {
-          return classData().published == true || classOwner();
+          return classData().published == true || classOwner() || enrolled(classId);
         }
-        function googleUser() {
-          return signedIn() && request.auth.token.firebase.sign_in_provider == 'google.com';
+        function participant() {
+          return googleUser() && (classOwner() || enrolled(classId));
         }
         function currentVideo(video) {
           return video is map && video.id == videoKey && classData().videos.hasAny([video]);
@@ -59,7 +133,7 @@ service cloud.firestore {
               && get(/databases/$(database)/documents/classes/$(classId)/videoActivity/$(videoKey)/comments/$(parentId)).data.deleted == false);
           }
           allow read: if accessible();
-          allow create: if googleUser() && accessible()
+          allow create: if participant()
             && request.resource.data.keys().hasAll(['authorUid', 'alias', 'body', 'parentId', 'video', 'createdAt', 'deleted'])
             && request.resource.data.keys().hasOnly(['authorUid', 'alias', 'body', 'parentId', 'video', 'createdAt', 'deleted'])
             && request.resource.data.authorUid == request.auth.uid
@@ -69,7 +143,7 @@ service cloud.firestore {
             && currentVideo(request.resource.data.video)
             && request.resource.data.createdAt == request.time
             && request.resource.data.deleted == false;
-          allow update: if googleUser() && accessible()
+          allow update: if participant()
             && (resource.data.authorUid == request.auth.uid || classOwner())
             && resource.data.deleted == false
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'deleted'])
@@ -78,14 +152,14 @@ service cloud.firestore {
         }
         match /reactions/{uid} {
           allow read: if accessible();
-          allow create, update: if googleUser() && accessible() && uid == request.auth.uid
+          allow create, update: if participant() && uid == request.auth.uid
             && request.resource.data.keys().hasAll(['authorUid', 'type', 'video', 'updatedAt'])
             && request.resource.data.keys().hasOnly(['authorUid', 'type', 'video', 'updatedAt'])
             && request.resource.data.authorUid == request.auth.uid
             && request.resource.data.type in ['heart', 'thumbsUp', 'idea', 'clap']
             && currentVideo(request.resource.data.video)
             && request.resource.data.updatedAt == request.time;
-          allow delete: if googleUser() && accessible() && uid == request.auth.uid
+          allow delete: if participant() && uid == request.auth.uid
             && resource.data.authorUid == request.auth.uid;
         }
       }

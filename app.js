@@ -1,11 +1,13 @@
 import {escapeHTML as e, youtubeId, todayKey, daysUntil, deadlineLabel, shortDate, totalPoints, makeDemo} from './core.js';
 import {REACTIONS, normalizeCommentInput, summarizeReactions} from './discussion.js';
+import {normalizeClassCode, normalizeStudentAlias} from './enrollment.js';
 
 const root = document.querySelector('#app');
 const dialog = document.querySelector('#editor');
 const params = new URLSearchParams(location.search);
 const demo = params.get('demo') === '1';
 const viewOnly = params.get('view') === '1';
+const studentPortal = params.get('role') === 'student' || viewOnly;
 let data = null, user = null, backend = null, unsubscribe = null, authUnsubscribe = null;
 let section = 'home', filter = '전체', search = '', saving = false, classes = [], loading = !!params.get('class');
 let toastTimer;
@@ -13,8 +15,12 @@ let editorVersion;
 let activityStop = null, activityContext = '', activeVideoKey = null;
 let activity = {comments:[], reactions:[]}, activityLoading = false, activityError = '';
 let activityBusy = false;
+let membership = null, joinedClasses = [], portalLoading = false, portalError = '', joining = false;
+let enrollmentStop = null, enrollmentClassId = null, codeBusy = false, enrollmentCode = '', classMembers = [];
+const enrollmentDraft = {code:'',alias:storedAlias()};
 const discussionDrafts = new Map();
-const participantUid = () => demo ? 'demo-participant' : user?.uid;
+const canParticipate = () => demo || !!(data && user && (data.ownerUid === user.uid || membership?.uid === user.uid));
+const participantUid = () => demo ? 'demo-participant' : canParticipate() ? user?.uid : null;
 function storedAlias() { try { return localStorage.getItem('classpage-discussion-alias') || ''; } catch { return ''; } }
 function draftFor(key) { if(!discussionDrafts.has(key)) discussionDrafts.set(key,{alias:storedAlias(),body:'',parentId:''});return discussionDrafts.get(key); }
 const icons = {
@@ -43,10 +49,11 @@ function render() {
   root.innerHTML = `<div class="shell">
     <aside class="sidebar"><a class="brand" href="/">${icon('book')}<span>클래스페이지<small>우리 반의 하루를 한곳에</small></span></a>
       <div class="class-badge"><span class="class-avatar">${icon('home')}</span><div><strong>${e(data.name)}</strong><small>${demo ? '예시 학급 · 이 기기에 저장' : canEdit() ? '선생님 관리 공간' : '학생 공유 공간'}</small></div></div>
+      ${!demo?`<a class="class-switch" href="${canEdit()?'/':'?role=student'}">${icon('book')} ${canEdit()?'내 학급 · 새 학급 만들기':'내가 속한 학급'} ${icon('arrow')}</a>`:''}
       <p class="nav-label">CLASSROOM</p><nav>${nav.map(([key,label]) => `<button class="nav-item ${section===key?'active':''}" data-nav="${key}" ${section===key?'aria-current="page"':''}>${icon(key)}<span>${label}</span>${key==='assessment'?`<small>${data.assessments.filter(a=>!a.done&&daysUntil(a.due)>=0).length}</small>`:''}</button>`).join('')}</nav>
-      <div class="sidebar-bottom"><div class="sidebar-note">작은 소식이 모여<br>우리 반의 하루가 됩니다.</div>${canEdit()?'<button class="text-button" data-action="settings">학급 설정</button>':''}<a href="/" class="text-button">${demo?'예시 나가기':'학급 선택으로'}</a></div>
+      <div class="sidebar-bottom"><div class="sidebar-note">작은 소식이 모여<br>우리 반의 하루가 됩니다.</div>${canEdit()?'<button class="text-button" data-action="settings">학급 설정</button>':''}<a href="${studentPortal?'?role=student':'/'}" class="text-button">${demo?'예시 나가기':'학급 선택으로'}</a></div>
     </aside>
-    <div class="main-wrap"><header class="topbar"><span>우리 반 / <strong>${active[1]}</strong></span><div class="top-actions">${canEdit()?`<button class="button secondary compact" data-action="share">${icon('share')} 학급 공유</button>`:''}<span class="user-chip">${canEdit()?'교사':'학생'}${demo?' · 예시':''}</span>${user?'<button class="text-button" data-action="logout">로그아웃</button>':''}</div></header>
+    <div class="main-wrap"><header class="topbar"><span>우리 반 / <strong>${active[1]}</strong></span><div class="top-actions">${canEdit()?`<button class="button secondary compact" data-action="enrollment">학급 코드</button><button class="button secondary compact" data-action="share">${icon('share')} 학급 공유</button>`:!demo&&!membership?'<a class="text-button" href="?role=student">학급 코드로 가입</a>':''}<span class="user-chip">${canEdit()?'교사':membership?'학급 학생':'방문자'}${demo?' · 예시':''}</span>${user?'<button class="text-button" data-action="logout">로그아웃</button>':''}</div></header>
     <main><div class="page-heading"><div><div class="eyebrow">${e(date)}</div><h1>${section==='home'?'반가워요, 우리 반!':active[1]}</h1><p>${{home:'오늘 꼭 알아야 할 소식, 여기서 함께 확인해요.',notice:'놓치지 말아야 할 학교와 학급의 소식입니다.',assessment:'미리 확인하고, 차근차근 준비해요.',points:'서로의 좋은 행동을 발견하고 응원해요.',video:'좋은 이야기는 함께 볼 때 더 커집니다.'}[section]}</p></div>${canEdit() && section!=='home'?`<button class="button primary" data-action="add">${icon('plus')} ${{notice:'공지 등록',assessment:'수행평가 등록',points:'학생 추가',video:'영상 추가'}[section]}</button>`:''}</div>
     ${demo?'<div class="demo-banner"><span>예시 학급입니다. 변경 내용은 이 브라우저에만 저장됩니다.</span><button data-action="reset-demo">예시 초기화</button></div>':''}
     ${section==='home'?renderHome():section==='notice'?renderNotices():section==='assessment'?renderAssessments():section==='points'?renderPoints():renderVideos()}
@@ -56,12 +63,52 @@ function render() {
 
 function renderWelcome() {
   stopVideoActivity();
+  if(studentPortal)return renderStudentPortal();
   root.innerHTML = `<div class="welcome"><header><a class="brand" href="/">${icon('book')}<span>클래스페이지</span></a><span class="welcome-tag">FOR YOUR CLASSROOM</span></header>
   <main class="welcome-main"><div class="eyebrow">우리 반을 잇는 작은 공간</div><h1>우리 반의 모든 소식,<br><em>한 페이지에.</em></h1><p>쌓이는 공지와 수행평가 일정부터<br>작은 칭찬과 함께 보는 영상까지, 한곳에서 나눠요.</p>
-  ${loading?'<div class="loading-panel" role="status">학급을 불러오는 중입니다…</div>':`<div class="welcome-actions">${user?'<button class="button primary" data-action="create">새 학급 만들기</button>':'<button class="button primary" data-action="login"><span class="google-g">G</span> Google로 선생님 로그인</button>'}<a class="button secondary" href="?demo=1">예시 학급 둘러보기 ${icon('arrow')}</a></div>${user?`<div class="class-list"><h2>내 학급</h2>${classes.length?classes.map(c=>`<a href="?class=${encodeURIComponent(c.id)}">${icon('home')} ${e(c.name)} ${icon('arrow')}</a>`).join(''):'<p>새 학급을 만들고 첫 소식을 전해 보세요.</p>'}</div><button class="text-button" data-action="logout">로그아웃</button>`:'<small class="welcome-help">학생은 선생님이 보내 준 학급 공유 링크로 들어오세요.</small>'}`}
+  ${loading?'<div class="loading-panel" role="status">학급을 불러오는 중입니다…</div>':`<div class="welcome-actions">${user?'<button class="button primary" data-action="create">새 학급 만들기</button>':'<button class="button primary" data-action="login"><span class="google-g">G</span> 교사 로그인</button>'}<a class="button secondary" href="?role=student">학생 로그인 ${icon('arrow')}</a><a class="text-button" href="?demo=1">예시 학급 둘러보기</a></div>${user?`<div class="class-list"><h2>내가 만든 학급 <span>${classes.length}</span></h2><p class="helper">학급마다 별도 코드를 만들고 학생 그룹을 관리할 수 있어요.</p>${portalLoading?'<p role="status">학급을 불러오는 중입니다…</p>':classes.length?classes.map(c=>`<a href="?class=${encodeURIComponent(c.id)}">${icon('home')} ${e(c.name)} ${icon('arrow')}</a>`).join(''):'<p>새 학급을 만들고 첫 소식을 전해 보세요.</p>'}</div><button class="text-button" data-action="logout">로그아웃</button>`:'<small class="welcome-help">학생은 학생 로그인에서 선생님이 알려 준 학급 코드를 입력하세요.</small>'}`}
   <div id="welcome-error" role="alert"></div>
   <div class="feature-grid">${[['notice','흩어진 공지, 한곳에','학급·학교 소식을 모아 확인해요.'],['assessment','마감일을 한눈에','수행평가를 여유 있게 준비해요.'],['points','작은 실천에 큰 칭찬','좋은 행동을 상점으로 기록해요.'],['video','함께 보고 이야기해요','유튜브 링크만으로 영상을 공유해요.']].map(([key,title,desc])=>`<article><div class="feature-icon ${key}">${icon(key)}</div><h2>${title}</h2><p>${desc}</p></article>`).join('')}</div>
   </main><footer>클래스페이지 · 우리 반의 하루를 한곳에</footer></div>`;
+}
+
+function renderStudentPortal() {
+  root.innerHTML=`<div class="welcome student-welcome"><header><a class="brand" href="/">${icon('book')}<span>클래스페이지</span></a><a class="text-button" href="/">교사 공간으로</a></header><main class="welcome-main"><div class="eyebrow">우리 반에 함께해요</div><h1>학급 코드로<br><em>우리 반에 입장해요.</em></h1><p>선생님이 알려 준 코드를 입력해 가입하세요.<br>다음부터는 내 학급에서 바로 들어올 수 있어요.</p>
+  ${loading?'<div class="loading-panel" role="status">학급을 불러오는 중입니다…</div>':`<form id="join-class-form" class="join-class-form" aria-busy="${joining}"><label>학급 코드<input name="code" aria-label="학급 코드" value="${e(enrollmentDraft.code)}" maxlength="24" placeholder="선생님이 알려 준 10자리 코드" autocomplete="off" autocapitalize="characters" spellcheck="false" required ${joining?'disabled':''}></label><label>참여 별칭<input name="alias" aria-label="참여 별칭" value="${e(enrollmentDraft.alias)}" maxlength="20" placeholder="예: 7번 · 별빛" autocomplete="off" required ${joining?'disabled':''}></label><p class="helper">실명이나 연락처 대신 번호·별칭을 사용해 주세요.</p><p id="join-error" role="alert">${e(portalError)}</p><button class="button primary" type="submit" ${joining?'disabled':''}>${joining?'학급에 가입하는 중…':user?'학급에 가입하기':'Google 로그인하고 가입하기'}</button>${!user?'<button class="text-button" type="button" data-action="login">이미 가입했나요? Google로 내 학급 보기</button>':''}</form>
+  ${user?`<section class="class-list joined-class-list"><h2>내가 속한 학급 <span>${joinedClasses.length}</span></h2>${portalLoading?'<p role="status">내 학급을 불러오는 중입니다…</p>':joinedClasses.length?joinedClasses.map(c=>`<a href="?class=${encodeURIComponent(c.id)}&view=1&role=student">${icon('home')}<span>${e(c.name)}<small>${e(c.alias)}</small></span>${icon('arrow')}</a>`).join(''):'<p>아직 가입한 학급이 없어요. 위에서 학급 코드를 입력하세요.</p>'}</section><button class="text-button" data-action="logout">로그아웃</button>`:''}`}
+  <div id="welcome-error" role="alert"></div><p class="student-privacy">코드로 가입하면 해당 선생님의 학급 학생 목록에 별칭이 표시됩니다.<br>다른 학급에 가입하려면 그 학급의 코드를 입력하세요.</p></main><footer>클래스페이지 · 우리 반을 잇는 작은 공간</footer></div>`;
+}
+
+async function joinClass(form) {
+  if(joining)return;
+  const code=normalizeClassCode(form.elements.code.value),alias=normalizeStudentAlias(form.elements.alias.value);
+  enrollmentDraft.code=code;enrollmentDraft.alias=alias;joining=true;portalError='';renderWelcome();
+  try{
+    await ensureBackend();if(!user)await backend.login();
+    const classId=await backend.joinClassByCode(code,alias);
+    try{localStorage.setItem('classpage-discussion-alias',alias);}catch{}
+    location.href=`?class=${encodeURIComponent(classId)}&view=1&role=student`;
+  }catch(error){portalError=errorText(error);}
+  finally{joining=false;renderWelcome();}
+}
+
+function stopEnrollmentRoster(){if(enrollmentStop)enrollmentStop();enrollmentStop=null;enrollmentClassId=null;}
+function enrollmentPanel(){
+  return `<p class="dialog-helper">이 학급만의 코드를 학생에게 알려 주세요. 같은 코드로 가입한 학생은 이 학급에 모입니다.</p><div class="enrollment-code"><span>학생 가입 코드</span><strong>${enrollmentCode?e(enrollmentCode.slice(0,5)+'-'+enrollmentCode.slice(5)):'아직 발급하지 않았어요'}</strong><button class="button primary compact" type="button" data-generate-code ${codeBusy?'disabled':''}>${codeBusy?'발급 중…':enrollmentCode?'새 코드로 재발급':'학급 코드 생성'}</button></div><p class="helper">재발급하면 이전 코드로 새로 가입할 수 없습니다. 이미 가입한 학생의 소속은 유지됩니다.</p><h3 class="roster-heading">가입한 학생 <span id="member-count">${classMembers.length}</span></h3><div id="class-roster">${rosterHTML()}</div>`;
+}
+function rosterHTML(){return classMembers.length?`<ul class="member-list">${classMembers.map(m=>`<li><span class="member-avatar">${e(m.alias.slice(0,2))}</span><strong>${e(m.alias)}</strong><small>학급 학생</small></li>`).join('')}</ul>`:'<p class="dialog-helper">아직 가입한 학생이 없어요. 코드를 안내해 주세요.</p>';}
+async function openEnrollment(){
+  if(!canEdit())return;
+  if(demo)return openDialog('학급 코드 안내','<p class="dialog-helper">예시 학급에서는 실제 코드를 발급하지 않습니다. 교사 로그인 후 학급을 만들어 사용해 주세요.</p>',null);
+  const classId=data.id;
+  const settings=await backend.getEnrollment(classId);if(data?.id!==classId||!canEdit())return;
+  enrollmentCode=settings?.code||'';classMembers=[];codeBusy=false;
+  openDialog('학급 코드 · 학생 관리',enrollmentPanel(),null);
+  enrollmentClassId=classId;
+  enrollmentStop=backend.subscribeClassMembers(classId,members=>{
+    if(enrollmentClassId!==classId||!dialog.open)return;classMembers=members;
+    dialog.querySelector('#class-roster').innerHTML=rosterHTML();dialog.querySelector('#member-count').textContent=String(members.length);
+  },error=>{if(enrollmentClassId===classId&&dialog.open)dialog.querySelector('#form-error').textContent=errorText(error);});
 }
 
 function noticeCard(n, compact=false) {
@@ -101,7 +148,7 @@ function discussionPanel(video) {
     <div class="community-heading"><h4>함께 나누는 생각</h4><span>${demo?'이 브라우저에 저장':'실시간 대화'}</span></div>
     <p class="community-guide">마음에 남은 장면, 서로 다른 생각을 나눠요.</p>
     <div class="reaction-group" aria-label="영상 반응"></div>
-    ${participantUid()?`<form id="comment-form" data-video="${e(video.id)}"><label class="alias-label">참여 별칭<input name="alias" aria-label="참여 별칭" maxlength="20" placeholder="예: 7번 · 별빛" value="${e(draft.alias)}" required></label><div class="reply-context"></div><label class="comment-label">내 생각 남기기<textarea name="body" aria-label="내 생각 남기기" rows="3" maxlength="1000" placeholder="어떤 생각이 들었나요? 서로를 존중하며 이야기해요." required>${e(draft.body)}</textarea></label><div class="comment-submit"><span>실명·연락처 대신 별칭을 사용해요.</span><button type="submit" class="button primary compact">댓글 등록</button></div></form>`:`<div class="discussion-login"><p>댓글과 반응을 남기려면 Google로 로그인해 주세요.<br>친구들에게는 참여 별칭만 표시됩니다.</p><button class="button secondary compact" data-action="login">Google로 참여하기</button></div>`}
+    ${participantUid()?`<form id="comment-form" data-video="${e(video.id)}"><label class="alias-label">참여 별칭<input name="alias" aria-label="참여 별칭" maxlength="20" placeholder="예: 7번 · 별빛" value="${e(draft.alias)}" required></label><div class="reply-context"></div><label class="comment-label">내 생각 남기기<textarea name="body" aria-label="내 생각 남기기" rows="3" maxlength="1000" placeholder="어떤 생각이 들었나요? 서로를 존중하며 이야기해요." required>${e(draft.body)}</textarea></label><div class="comment-submit"><span>실명·연락처 대신 별칭을 사용해요.</span><button type="submit" class="button primary compact">댓글 등록</button></div></form>`:`<div class="discussion-login"><p>댓글과 반응은 학급에 가입한 학생이 남길 수 있어요.<br>학생 로그인에서 선생님의 학급 코드를 입력해 주세요.</p><a class="button secondary compact" href="?role=student">학급 코드로 가입하기</a></div>`}
     <p class="activity-status" role="status"></p><div class="comment-list" aria-label="영상 댓글"></div>
     <p class="community-footnote">최근 댓글·답글 100개를 보여 줍니다. 공개 학급의 대화는 공유 링크로 볼 수 있어요.</p>
   </section>`;
@@ -179,6 +226,7 @@ root.addEventListener('submit',event=>{if(event.target.id!=='comment-form')retur
 
 const collections = {notice:'notices',assessment:'assessments',points:'students',video:'videos'};
 function openDialog(title, content, submit, label='저장하기') {
+  stopEnrollmentRoster();
   editorVersion=data?.version;
   dialog.innerHTML = `<form id="edit-form"><div class="dialog-heading"><h2 id="dialog-title">${title}</h2><button type="button" class="close-button" data-close aria-label="닫기">×</button></div>${content}<p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary" data-close>취소</button>${submit?`<button class="button primary" type="submit">${label}</button>`:''}</div></form>`;
   dialog.showModal();
@@ -224,10 +272,11 @@ function history(studentId) {
 }
 async function share() {
   if(demo) return openDialog('예시 학급 공유 안내','<p class="dialog-helper">예시 학급은 이 브라우저에만 저장됩니다. 실제 학생과 공유하려면 Google 로그인 후 학급을 만들어 주세요.</p>',null);
-  openDialog('학생에게 학급 공유',`<p class="dialog-helper">공유를 켜면 이 링크를 가진 누구나 공지, 수행평가, 별칭과 상점, 영상을 볼 수 있습니다.</p><label class="checkbox"><input name="published" type="checkbox" ${data.published?'checked':''}> 학생 공유 켜기</label><label>학생 공유 링크<input readonly value="${e(`${location.origin}${location.pathname}?class=${encodeURIComponent(data.id)}&view=1`)}" onclick="this.select()"></label><p class="helper">설정을 저장한 후 위 링크를 복사해 전달하세요. 공유를 끄면 학생 접근이 차단됩니다.</p>`,async form=>mutate(next=>{next.published=form.has('published');}),'공유 설정 저장');
+  openDialog('학급 링크 공개',`<p class="dialog-helper">공개를 켜면 이 링크를 가진 누구나 공지, 수행평가, 별칭과 상점, 영상과 대화를 볼 수 있습니다. 코드로 가입한 학생은 공개 여부와 관계없이 로그인해 들어올 수 있습니다.</p><label class="checkbox"><input name="published" type="checkbox" ${data.published?'checked':''}> 방문자에게도 링크 공개</label><label>학급 공유 링크<input readonly value="${e(`${location.origin}${location.pathname}?class=${encodeURIComponent(data.id)}&view=1`)}" onclick="this.select()"></label><p class="helper">학급 학생만 이용하게 하려면 공개를 끄고, 학급 코드로 가입하도록 안내하세요.</p>`,async form=>mutate(next=>{next.published=form.has('published');}),'공개 설정 저장');
 }
 
 root.addEventListener('input', event=>{
+  if(event.target.closest('#join-class-form')&&['code','alias'].includes(event.target.name))enrollmentDraft[event.target.name]=event.target.value;
   if(event.target.closest('#comment-form')&&['alias','body'].includes(event.target.name))draftFor(activeVideoKey)[event.target.name]=event.target.value;
   if(event.target.id==='search'){const position=event.target.selectionStart;search=event.target.value;render();const input=document.querySelector('#search');input.focus();input.setSelectionRange(position,position);}
 });
@@ -237,7 +286,7 @@ root.addEventListener('click', async event=>{
     if(button.dataset.discuss){activeVideoKey=button.dataset.discuss;render();return;}
     if(button.dataset.reply){draftFor(activeVideoKey).parentId=button.dataset.reply;refreshVideoActivity();root.querySelector('[name=body]')?.focus();return;}
     if(button.dataset.reaction){
-      if(!participantUid()){toast('Google로 로그인한 뒤 반응을 남겨 주세요.');return;}
+      if(!participantUid()){toast('학생 로그인에서 학급 코드로 가입한 뒤 반응을 남겨 주세요.');return;}
       if(activityBusy||activityLoading||activityError)return;
       const video=data.videos.find(v=>v.id===activeVideoKey);if(!video)return;
       activityBusy=true;refreshVideoActivity();
@@ -267,12 +316,29 @@ root.addEventListener('click', async event=>{
     if(action==='retry-discussion'){stopVideoActivity();syncVideoActivity();return;}
     if(action==='add')editItem(section);
     if(action==='share')await share();
+    if(action==='enrollment')await openEnrollment();
     if(action==='settings')openDialog('학급 설정',field('학급 이름','name',data.name,'text',60),async form=>{const name=form.get('name').trim();if(!name)throw new Error('학급 이름을 입력하세요.');await mutate(next=>{next.name=name;});});
     if(action==='reset-demo')openDialog('예시 초기화','<p class="dialog-helper">이 브라우저에서 수정한 예시 내용을 초기화할까요?</p>',async()=>{const next=makeDemo();localStorage.setItem('classpage-demo-v1',JSON.stringify(next));localStorage.removeItem('classpage-video-activity-v1');discussionDrafts.clear();stopVideoActivity();data=next;render();toast('예시 학급을 초기화했습니다.');},'초기화');
     if(action==='login'){button.disabled=true;try{await ensureBackend();await backend.login();}finally{button.disabled=false;}}
-    if(action==='logout'){await backend.logout();if(!params.get('class')){if(unsubscribe)unsubscribe();data=null;classes=[];location.href=location.pathname;}}
+    if(action==='logout'){await backend.logout();if(!params.get('class')){if(unsubscribe)unsubscribe();data=null;classes=[];location.href=studentPortal?'?role=student':location.pathname;}}
     if(action==='create')openDialog('새 학급 만들기',field('학급 이름','name','','text',60),async form=>{const name=form.get('name').trim();if(!name)throw new Error('학급 이름을 입력하세요.');const classId=await backend.createClass(name);location.href=`?class=${encodeURIComponent(classId)}`;},'학급 만들기');
   } catch(error){toast(errorText(error));}
+});
+root.addEventListener('submit',event=>{if(event.target.id!=='join-class-form')return;event.preventDefault();joinClass(event.target).catch(error=>{portalError=errorText(error);renderWelcome();});});
+dialog.addEventListener('close',stopEnrollmentRoster);
+dialog.addEventListener('click',async event=>{
+  const button=event.target.closest('[data-generate-code]');if(!button||codeBusy||!canEdit()||!enrollmentClassId)return;
+  const classId=enrollmentClassId;
+  codeBusy=true;button.disabled=true;button.textContent='발급 중…';
+  try{
+    const code=await backend.generateClassCode(classId);
+    if(enrollmentClassId!==classId||!dialog.open)return;
+    enrollmentCode=code;
+    const content=dialog.querySelector('.enrollment-code');
+    content.querySelector('strong').textContent=code.slice(0,5)+'-'+code.slice(5);
+    button.textContent='새 코드로 재발급';dialog.querySelector('#form-error').textContent='';toast('학급 코드를 발급했습니다.');
+  }catch(error){if(enrollmentClassId===classId&&dialog.open)dialog.querySelector('#form-error').textContent=errorText(error);}
+  finally{codeBusy=false;if(button.isConnected){button.disabled=false;button.textContent=enrollmentCode?'새 코드로 재발급':'학급 코드 생성';}}
 });
 dialog.addEventListener('click',async event=>{const button=event.target.closest('[data-undo]');if(!button||button.disabled)return;button.disabled=true;try{await mutate(next=>{const s=next.students.find(s=>s.id===button.dataset.student);const h=s.history.find(h=>h.id===button.dataset.undo);if(s.history.some(x=>x.undoOf===h.id))throw new Error('이미 취소된 기록입니다.');if(s.history.length>=200)throw new Error('기록이 가득 차 취소 기록을 저장할 수 없습니다.');s.history.push({id:id(),amount:-h.amount,reason:`취소: ${h.reason}`,date:todayKey(),undoOf:h.id});});dialog.close();history(button.dataset.student);}catch(error){toast(errorText(error));button.disabled=false;}});
 
@@ -286,13 +352,24 @@ function watchClass(classId) {
 }
 
 let backendPromise;
+let authEpoch=0;
 async function ensureBackend(){
   if(!backendPromise)backendPromise=import('./firebase.js').then(module=>{
     backend=module;
     authUnsubscribe=backend.observeAuth(async current=>{
-      user=current;
-      if(params.get('class')) watchClass(params.get('class'));
-      else if(!data){try{classes=user?await backend.listClasses(user.uid):[];}catch(error){toast(backend.getErrorMessage(error));}render();}
+      const epoch=++authEpoch;
+      user=current;membership=null;
+      if(params.get('class')){
+        if(unsubscribe)unsubscribe();data=null;loading=true;render();
+        try{const joined=user?await backend.getClassMembership(params.get('class')):null;if(epoch!==authEpoch)return;membership=joined;watchClass(params.get('class'));}
+        catch(error){if(epoch!==authEpoch)return;loading=false;render();document.querySelector('#welcome-error').textContent=errorText(error);}
+      }
+      else if(!data){
+        classes=[];joinedClasses=[];portalLoading=!!user;render();
+        try{const list=user?await (studentPortal?backend.listJoinedClasses():backend.listClasses(user.uid)):[];if(epoch!==authEpoch)return;if(studentPortal)joinedClasses=list;else classes=list;}
+        catch(error){if(epoch!==authEpoch)return;portalError=errorText(error);toast(portalError);}
+        if(epoch!==authEpoch)return;portalLoading=false;render();
+      }
       else if(data)render();
     });return module;
   }).catch(error=>{backendPromise=null;throw error;});

@@ -73,6 +73,17 @@ const cleanup = await fetch(`http://${host}/emulator/v1/projects/${project}/data
   method: 'DELETE', headers: { Authorization: 'Bearer owner' },
 });
 assert.equal(cleanup.status, 200, 'reset isolated demo emulator');
+async function memberFixtures(enrolled) {
+  const writes = ['student-a', 'student-b'].flatMap(uid => {
+    const paths = [`classMembers/${classId}/students/${uid}`, `studentClasses/${uid}/classes/${classId}`];
+    return paths.map(path => enrolled ? write(path, { classId, uid, ownerUid: 'teacher', alias: 'Student',
+      joinCode: 'ABCDEFGHJK' }, 'joinedAt').writes[0] : { delete: `${documentRoot}/${path}` });
+  });
+  const response = await fetch(`${base}:commit`, { method: 'POST', headers: {
+    'Content-Type': 'application/json', Authorization: 'Bearer owner',
+  }, body: JSON.stringify({ writes }) });
+  assert.equal(response.status, 200, 'membership fixtures applied to isolated emulator');
+}
 await commit('teacher creates private class', 'teacher', write(classPath, data, 'updatedAt'), 200);
 await commit('private class rejects student comment', 'student-a', addComment('private'));
 await commit('private class rejects student reaction', 'student-a', react());
@@ -87,6 +98,10 @@ await commit('guest cannot comment', null, addComment('guest'));
 await commit('guest cannot react', null, react());
 await commit('non-Google account cannot comment', 'student-a', addComment('custom'), 403, 'custom');
 await commit('non-Google account cannot react', 'student-a', react(), 403, 'password');
+await commit('Google nonmember cannot comment on public class', 'student-a', addComment('outsider'));
+await commit('Google nonmember cannot react on public class', 'student-a', react());
+// Enrollment behavior has its own full rules suite; these fixtures isolate video rules.
+await memberFixtures(true);
 await commit('student creates root comment', 'student-a', addComment('root'), 200);
 await commit('another student replies to root', 'student-b', addComment('reply', { authorUid: 'student-b', parentId: 'root' }), 200);
 await read('public reply visible to guest', `${activity}/comments/reply`, null, 200);
@@ -138,6 +153,9 @@ await commit('reaction stale timestamp denied', 'student-a', oldReactionTime);
 await commit('other student cannot delete reaction', 'student-b', { writes: [{ delete: `${documentRoot}/${activity}/reactions/student-a` }] });
 await commit('student removes own reaction', 'student-a', { writes: [{ delete: `${documentRoot}/${activity}/reactions/student-a` }] }, 200);
 await commit('student recreates reaction', 'student-a', react(), 200);
+// The following legacy revocation cases concern nonmembers. Enrolled private
+// access and persistence through unpublish are verified in rules-enrollment.mjs.
+await memberFixtures(false);
 await commit('owner unpublishes class', 'teacher', write(classPath, { ...data, published: false, version: 2 }, 'updatedAt'), 200);
 await read('unpublish revokes guest comment reads', `${activity}/comments`);
 await read('unpublish revokes student comment reads', `${activity}/comments`, 'student-a');
